@@ -8,11 +8,21 @@ import io
 import requests, os
 from datetime import datetime, timezone, timedelta
 
+import shutil
+
+
 jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
 jst_today_str = jst_today.strftime('%Y%m%d%H%m%S')
-os.makedirs(f"classroomArchieve/archieve_{jst_today_str}")
-os.makedirs(f"classroomArchieve/archieve_{jst_today_str}/driveFiles")
-os.makedirs(f"classroomArchieve/archieve_{jst_today_str}/icons")
+
+base_dir = f"classroomArchive/archive_{jst_today_str}"
+
+os.makedirs(f"{base_dir}")
+os.makedirs(f"{base_dir}/driveFiles")
+os.makedirs(f"{base_dir}/icons")
+shutil.copy('materials/style.css', f"{base_dir}/css/style.css")
+shutil.copy('materials/assignment.svg', f"{base_dir}/img/assignment.svg")
+shutil.copy('materials/book.svg', f"{base_dir}/img/book.svg")
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
@@ -54,7 +64,7 @@ for teacher in teachers:
     profile = teacher["profile"]
     user_profiles[teacher["userId"]] = profile
     if "photoUrl" in profile:
-        path = f"output/icons/{profile["id"]}.png"
+        path = f"{base_dir}/icons/{profile["id"]}.png"
         if os.path.exists(path):
             print(f"Skip (already exists): {path}")
         else:
@@ -79,7 +89,7 @@ def get_jst_str(iso_str):
 drive_service = build("drive", "v3", credentials=creds)
 
 def download_drive_file(file_id, filename):
-    path = f"output/driveFiles/id_{file_id}_name_{filename}"
+    path = f"{base_dir}/driveFiles/id_{file_id}_name_{filename}"
 
     if os.path.exists(path):
         print(f"Skip (already exists): {filename}")

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="../output/style.css">
+    <link rel="stylesheet" href="./css/style.css">
     <title>{{ name }}</title>
 </head>
 <body>
@@ -28,11 +28,11 @@
                 <img class="creator-photo" src="icons/{{ item.creatorUserProfile.id }}.png" alt="アイコン">
                 {% elif item.item_type == "CourseWork" %}
                 <div class="icon-wrapper">
-                    <img class="icon" src="./default/assignment.svg" alt="アイコン">
+                    <img class="icon" src="./img/assignment.svg" alt="アイコン">
                 </div>
                 {% elif item.item_type == "CourseWorkMaterial" %}
                 <div class="icon-wrapper">
-                    <img class="icon" src="./default/book.svg" alt="アイコン">
+                    <img class="icon" src="./img/book.svg" alt="アイコン">
                 </div>
                 {% endif %}
                 <div class="detail">
