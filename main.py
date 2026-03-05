@@ -8,6 +8,12 @@ import io
 import requests, os
 from datetime import datetime, timezone, timedelta
 
+jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
+jst_today_str = jst_today.strftime('%Y%m%d%H%m%S')
+os.makedirs(f"classroomArchieve/archieve_{jst_today_str}")
+os.makedirs(f"classroomArchieve/archieve_{jst_today_str}/driveFiles")
+os.makedirs(f"classroomArchieve/archieve_{jst_today_str}/icons")
+
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.announcements.readonly",
@@ -17,6 +23,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
     "https://www.googleapis.com/auth/classroom.profile.photos",
     "https://www.googleapis.com/auth/classroom.addons.student",
+    "https://www.googleapis.com/auth/classroom.topics.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
@@ -25,7 +32,7 @@ creds = flow.run_local_server(port=0)
 service = build("classroom", "v1", credentials=creds)
 courses = service.courses().list().execute()
 
-env = Environment(loader=FileSystemLoader("templates"))
+env = Environment(loader=FileSystemLoader("materials"))
 template = env.get_template("course.html")
 
 user_profiles = {}
@@ -39,6 +46,7 @@ announcements = service.courses().announcements().list(courseId=course["id"]).ex
 course_work = service.courses().courseWork().list(courseId=course["id"]).execute().get("courseWork", [])
 course_work_materials = service.courses().courseWorkMaterials().list(courseId=course["id"]).execute().get("courseWorkMaterial", [])
 teachers = service.courses().teachers().list(courseId=course["id"]).execute().get("teachers", [])
+topics = service.courses().topics().list(courseId=course["id"]).execute().get("topic", [])
 
 for teacher in teachers:
     if teacher["userId"] in user_profiles:
@@ -89,14 +97,19 @@ def download_drive_file(file_id, filename):
         except HttpError as error:
             print(f"Failed to download file; filename: {filename}; file_id: {file_id};")
             print(error)
-        
+
+topic_map = {
+    topic["topicId"]: topic
+    for topic in topics
+}
 
 for item in list(announcements + course_work + course_work_materials):
     item["creatorUserProfile"] = user_profiles[item["creatorUserId"]]
     item["creationTime"] = get_jst_str(item["creationTime"])
     item["updateTime"] = get_jst_str(item["updateTime"])
-    if item["creationTime"] == item["updateTime"]:
-        item["updateTime"] = None
+    item["was_updated"] = item["creationTime"] != item["updateTime"]
+    if "topicId" in item:
+        item["topicName"] = topic_map[item["topicId"]]["name"]
 
     if "materials" in item:
         for material in item["materials"]:
@@ -149,6 +162,15 @@ for item in course_work:
                 file_name = attachment["driveFile"]["title"]
                 download_drive_file(file_id, file_name)
 
+for item in announcements:
+    item["item_type"] = "Announcement"
+for item in course_work:
+    item["item_type"] = "CourseWork"
+for item in course_work_materials:
+    item["item_type"] = "CourseWorkMaterial"
+
+all_items = announcements + course_work + course_work_materials
+all_items.sort(key=lambda item: item['updateTime'], reverse=True)
 
 html = template.render(
     name=course["name"],
@@ -156,6 +178,7 @@ html = template.render(
     announcements=announcements,
     course_work=course_work,
     course_work_materials=course_work_materials,
+    all_items=all_items
 )
 
 

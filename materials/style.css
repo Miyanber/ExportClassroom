@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&display=swap');
+
+:root {
+    --black: #111111;
+    --white: #ffffff;
+    --accent-color: #0b669b;
+    --title-font: 'Hina Mincho', serif;
+    --body-font: 'Zen Kaku Gothic New', sans-serif;
+}
+
+body {
+    margin: 0;
+    color: var(--black);
+    font-family: "Google Sans", Roboto, Arial, sans-serif;
+}
+
+section {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 3rem;
+
+    h1 {
+        margin-bottom: 0;
+    }
+
+    .section {
+        margin-top: 0;
+        font-size: 1.375rem;
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 1.75rem;
+    }
+}
+
+.announcement {
+    padding: 1rem 1.5rem;
+    margin-bottom: 1rem;
+    border-radius: .75rem;
+    background-color: #f0f4f9;
+
+    .header {
+        display: flex;
+
+        .creator-photo, .icon-wrapper {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            margin-right: 1rem;
+            flex-shrink: 0;
+        }
+
+        .icon-wrapper {
+            position: relative;
+            background-color: #007BFF;
+
+            .icon {
+                position: absolute;
+                width: 60%;
+                height: 60%;
+                left: 20%;
+                top: 20%;
+            }
+        }
+
+        .detail {
+            font-size: .875rem;
+            line-height: 1.25rem;
+
+            .creator {
+                font-weight: 500;
+            }
+
+            .creatioon-time {
+                color: #444746;
+            }
+        }
+    }
+
+    .topic-name {
+        margin: .5rem 0;
+    }
+
+    .content {
+        margin-top: .5rem;
+        white-space: pre-wrap;
+        font-size: .875rem;
+    }
+
+    .materials {
+        margin-top: 1rem;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: .75rem;
+
+        .note {
+            box-sizing: border-box;
+            font-size: .875rem;
+            width: 100%;
+        }
+
+        .material {
+            box-sizing: border-box;
+            width: calc(50% - .375rem);
+            border-radius: .75rem;
+            background-color: var(--white);
+            border: .0625rem solid #c4c7c5;
+
+            a {
+                display: block;
+                width: 100%;
+                padding: .75rem 1rem;
+                color: #111111;
+                box-sizing: border-box;
+                text-decoration: none;
+
+                .link-title {
+                    text-decoration: underline;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    margin: 0;
+                    font-size: 1rem;
+                    font-weight: 500;
+                    line-height: 1.5rem;
+                }
+
+                .link-title:hover {
+                    color: #0b57d0;
+                }
+
+                .link-text {
+                    margin: 0;
+                    font-size: .875rem;
+                    font-weight: 400;
+                    letter-spacing: 0;
+                    line-height: 1.25rem;
+                    color: #444746;
+                    overflow: hidden;
+                    text-overflow: clip;
+                    white-space: nowrap;
+                }
+            }
+        }
+    }
+}

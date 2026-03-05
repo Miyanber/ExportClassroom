@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="../output/style.css">
+    <title>{{ name }}</title>
+</head>
+<body>
+    <div></div>
+
+    <section>
+        <h1>{{ name }}</h1>
+        {% if section %}<p class="section">{{ section }}</p>{% endif %}
+
+        <h2>補足</h2>
+        <p>
+            <ul>
+                <li>このクラスの全ての投稿・課題・資料がPCに保存されています。</li>
+            </ul>
+        </p>
+
+        <h2 id="announcements">ストリーム</h2>
+        {% for item in all_items %}
+        <div class="announcement">
+            <div class="header">
+                {% if item.item_type == "Announcement" %}
+                <img class="creator-photo" src="icons/{{ item.creatorUserProfile.id }}.png" alt="アイコン">
+                {% elif item.item_type == "CourseWork" %}
+                <div class="icon-wrapper">
+                    <img class="icon" src="./default/assignment.svg" alt="アイコン">
+                </div>
+                {% elif item.item_type == "CourseWorkMaterial" %}
+                <div class="icon-wrapper">
+                    <img class="icon" src="./default/book.svg" alt="アイコン">
+                </div>
+                {% endif %}
+                <div class="detail">
+                    <div class="creator">
+                        {{ item.creatorUserProfile.name.fullName }}
+                        {% if item.item_type == "CourseWork" %} さんが新しい課題を投稿しました: {{ item.title }}
+                        {% elif item.item_type == "CourseWorkMaterial" %} さんが新しい資料を投稿しました: {{ item.title }}
+                        {% endif %}
+                    </div>
+                    <div class="creation-time">{{ item.creationTime }}{% if item.was_updated %}（最終編集: {{ item.updateTime }}）{% endif %}</div>
+                </div>
+            </div>
+            {% if item.topicName %}
+            <div class="topic-name">トピック: {{ item.topicName }}</div>
+            {% endif %}
+            <div class="content">{{ item.text }}</div> 
+            {% if item.materials %}
+            <div class="materials">
+                {% for material in item.materials %}
+                {% with material=material %}
+                {% include 'material.html'  %}
+                {% endwith %}
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if item.attachments %}
+            <div class="materials">
+                <div class="note">添付ファイル</div>
+                {% for material in item.attachments %}
+                {% with material=material %}
+                {% include 'material.html'  %}
+                {% endwith %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </section>
+</body>
+</html>

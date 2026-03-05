@@ -208,5 +208,5 @@ __marimo__/
 
 # app
 credentials.json
-output/
-templates/example.json
+classroomArchive/*
+example.json
