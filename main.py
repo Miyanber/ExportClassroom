@@ -15,8 +15,7 @@ from tqdm import tqdm
 jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
 jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
 
-# base_dir = f"classroomArchive/archive_{jst_today_str}"
-base_dir = f"classroomArchive/archive_20260305180358"
+base_dir = f"classroomArchive/archive_{jst_today_str}"
 print(f"保存先: {base_dir}")
 
 os.makedirs(f"{base_dir}", exist_ok=True)
@@ -27,7 +26,6 @@ os.makedirs(f"{base_dir}/img/icons", exist_ok=True)
 shutil.copy('materials/style.css', f"{base_dir}/css/style.css")
 shutil.copy('materials/assignment.svg', f"{base_dir}/img/assignment.svg")
 shutil.copy('materials/book.svg', f"{base_dir}/img/book.svg")
-
 
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
@@ -40,11 +38,46 @@ SCOPES = [
     "https://www.googleapis.com/auth/classroom.addons.student",
     "https://www.googleapis.com/auth/classroom.topics.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 
 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
 creds = flow.run_local_server(port=0)
 service = build("classroom", "v1", credentials=creds)
+
+archive_folder_id = None
+
+try:
+    file_name = "archive_folder_id.txt"
+    drive_service = build("drive", "v3", credentials=creds)
+
+    if os.path.exists(file_name):
+        with open(file_name, "r") as f:
+            archive_folder_id = f.read()
+    else:
+        file_metadata = {
+            "name": "Classroom Archive",
+            "mimeType": "application/vnd.google-apps.folder",
+        }
+
+        file = drive_service.files().create(body=file_metadata, fields="id").execute()
+        archive_folder_id = file.get("id")
+        with open(file_name, "w") as f:
+            f.write(archive_folder_id)
+
+    # 個別フォルダ作成
+    file_metadata = {
+        "name": jst_today_str,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [archive_folder_id],
+    }
+    file = drive_service.files().create(body=file_metadata, fields="id").execute()
+    archive_folder_id = file.get("id")
+    
+
+except HttpError as error:
+    print(f"An error occurred: {error}")
+    exit(0)
 
 env = Environment(loader=FileSystemLoader("materials"))
 template = env.get_template("course.html")
@@ -52,7 +85,7 @@ template = env.get_template("course.html")
 def list_all(method, key):
     items = []
     page_token = None
-
+    
     while True:
         result = method(pageToken=page_token).execute()
         items.extend(result.get(key, []))
@@ -68,15 +101,24 @@ courses = list_all(
     "courses"
 )
 
+import threading
+thread_local = threading.local()
+import re
+
+stop_event = threading.Event()
+
+user_profiles = {}
+pictures_to_download = set()
+
 # for course in courses.get("courses", []):
 course = courses[4]
-print(f"コース情報: {course}")
+print(f"クラス名: {course["name"]}")
 
 announcements = list_all(
     lambda **kwargs: service.courses().announcements().list(courseId=course["id"], **kwargs),
     "announcements"
 )
-course_work = list_all(
+course_works = list_all(
     lambda **kwargs: service.courses().courseWork().list(courseId=course["id"], **kwargs),
     "courseWork"
 )
@@ -102,9 +144,7 @@ submissions = list_all(
     "studentSubmissions"
 )
 
-user_profiles = {}
-
-for teacher in tqdm(teachers, desc="教師アイコンを取得中"):
+for teacher in teachers:
     if teacher["userId"] in user_profiles:
         continue
     profile = teacher["profile"]
@@ -114,15 +154,8 @@ for teacher in tqdm(teachers, desc="教師アイコンを取得中"):
         if os.path.exists(path):
             print(f"Skip (already exists): {path}.png;")
         else:
-            r = requests.get(f"https:{profile["photoUrl"]}", )
-            if r.status_code == 200:
-                with open(path, "wb") as f:
-                    f.write(r.content)
-                print(f"Saved teacher icon: {path}.png;")
-            else:
-                print(f"Failed to save teacher icon: {path}.png; status_code: {r.status_code};")
+            pictures_to_download.add((f"https:{profile["photoUrl"]}", path))
 
-drive_files_to_download = []
 
 def get_jst_str(iso_str):
     utc_dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
@@ -131,17 +164,43 @@ def get_jst_str(iso_str):
     jst_dt_str = f"{jst_dt.year}年{jst_dt.month}月{jst_dt.day}日 {jst_dt.hour}時{jst_dt.minute}分"
     return jst_dt_str
 
+# 授業のトピック
+topic_map = {
+    topic["topicId"]: topic
+    for topic in topics
+}
 
-# driveFile download
-drive_service = build("drive", "v3", credentials=creds)
+# 提出物（課題の添付ファイル）
+submission_map = {
+    s["courseWorkId"]: s
+    for s in submissions
+}
 
+# ローカル保存時は{'DriveFile': driveFile}}, ドライブにコピー時は{'File': file}, 保存失敗時は{}を返す。
 def download_drive_file(file_id, filename):
-    path = f"{base_dir}/driveFiles/id_{file_id}_name_{filename}"
+    # 強制終了用
+    if stop_event.is_set():
+        print(f"Cancelled: {filename}")
+        return {}
 
+    # 念のためファイル名に利用不可の文字が含まれていないかチェック
+    filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
+
+    if not hasattr(thread_local, "drive_service"):
+        thread_local.drive_service = build("drive", "v3", credentials=creds)
+
+
+    path = f"{base_dir}/driveFiles/id_{file_id}_name_{filename}"
     if os.path.exists(path):
         print(f"Skip (already exists): {filename}")
-        return
+        return {
+            "DriveFile": {
+                "id": file_id,
+                "name": filename
+            }
+        }
     
+    drive_service = thread_local.drive_service
     request = drive_service.files().get_media(fileId=file_id)
     fh = io.FileIO(path, "wb")
     downloader = MediaIoBaseDownload(fh, request)
@@ -151,18 +210,76 @@ def download_drive_file(file_id, filename):
         try:
             status, done = downloader.next_chunk()
             print(f"filename: {filename}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
+            return {
+                "DriveFile": {
+                    "id": file_id,
+                    "name": filename
+                }
+            }
         except HttpError as error:
-            print(f"Failed to download file; filename: {filename}; file_id: {file_id};")
-            print(error)
+            if error.status_code != 404:
+                file = drive_service.files().copy(
+                    fileId=file_id,
+                    body={
+                        "name": filename,
+                        "parents": [archive_folder_id]
+                    },
+                    fields="id,name,webViewLink,mimeType"
+                ).execute()
+                print(f"ダウンロードできなかったため、ドライブにコピーが作成されました。ファイル名: {file["name"]}, リンク: {file['webViewLink']}")
+                return {
+                    "File": file
+                }
+            else:
+                print(f"Failed to download file; filename: {filename}; file_id: {file_id};")
+                print(error)
+                
             done = True
+    return {}
 
-# 授業のトピック
-topic_map = {
-    topic["topicId"]: topic
-    for topic in topics
-}
 
-for item in list(announcements + course_work + course_work_materials):
+def get_course_work_attachments(course_work):
+    submission = submission_map.get(course_work["id"])
+    if not submission:
+        return
+
+    assignmentSubmission = submission.get("assignmentSubmission")
+    if not assignmentSubmission:
+        return
+
+    attachments = assignmentSubmission.get("attachments", [])
+
+    course_work["attachments"] = attachments
+    for attachment in attachments:
+        if "driveFile" in attachment:
+            # Materialとのズレを修正するため
+            # テンプレートではMaterialと同様に扱う
+            attachment["driveFile"]["driveFile"] = attachment["driveFile"]
+            if "title" in attachment["driveFile"]:
+                file_id = attachment["driveFile"]["id"]
+                file_name = attachment["driveFile"]["title"]
+                file_dict = download_drive_file(file_id, file_name)
+                if "File" in file_dict:
+                    attachment["driveFile"]["driveFile"]["mimeType"] = file_dict["File"]["mimeType"]
+                    attachment["driveFile"]["driveFile"]["was_saved"] = True
+                elif "DriveFile" in file_dict:
+                    attachment["driveFile"]["driveFile"]["was_saved"] = True
+                else:
+                    attachment["driveFile"]["driveFile"]["was_saved"] = False
+
+
+for item in announcements:
+    item["item_type"] = "Announcement"
+for item in course_works:
+    item["item_type"] = "CourseWork"
+for item in course_work_materials:
+    item["item_type"] = "CourseWorkMaterial"
+
+all_items = announcements + course_works + course_work_materials
+# get_jst_str(item["creationTime"]) で変換する前に実行する必要あり
+all_items.sort(key=lambda item: item['updateTime'], reverse=True)
+
+def get_all_materials(item):
     item["creatorUserProfile"] = user_profiles[item["creatorUserId"]]
     item["creationTime"] = get_jst_str(item["creationTime"])
     item["updateTime"] = get_jst_str(item["updateTime"])
@@ -175,62 +292,56 @@ for item in list(announcements + course_work + course_work_materials):
             if "driveFile" in material and "title" in material["driveFile"]["driveFile"]:
                 file_id = material["driveFile"]["driveFile"]["id"]
                 file_name = material["driveFile"]["driveFile"]["title"]
-                drive_files_to_download.append((file_id, file_name))
+                file = download_drive_file(file_id, file_name)
+                if "File" in file:
+                    material["driveFile"]["driveFile"]["mimeType"] = file["File"]["mimeType"]
+                    material["driveFile"]["driveFile"]["was_saved"] = True
+                elif "DriveFile" in file:
+                    material["driveFile"]["driveFile"]["was_saved"] = True
+                else:
+                    material["driveFile"]["driveFile"]["was_saved"] = False
 
-# 提出物（課題の添付ファイル）
-submission_map = {
-    s["courseWorkId"]: s
-    for s in submissions
-}
 
-for item in course_work:
-    submission = submission_map.get(item["id"])
-    if not submission:
-        continue
+def download_file(url, path):
+    r = requests.get(url, timeout=10)
+    if r.status_code == 200:
+        with open(path, "wb") as f:
+            f.write(r.content)
+        print(f"Saved {path}.png")
+    else:
+        print(f"Failed to save {path}.png; status_code: {r.status_code};")
 
-    assignmentSubmission = submission.get("assignmentSubmission")
-    if not assignmentSubmission:
-        continue
+import signal
+import os
+signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
 
-    attachments = assignmentSubmission.get("attachments", [])
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    item["attachments"] = attachments
-    for attachment in attachments:
-        if "driveFile" in attachment:
-            # Materialとのズレを修正するため
-            # テンプレートではMaterialと同様に扱う
-            attachment["driveFile"]["driveFile"] = attachment["driveFile"]
-            if "title" in attachment["driveFile"]:
-                file_id = attachment["driveFile"]["id"]
-                file_name = attachment["driveFile"]["title"]
-                drive_files_to_download.append((file_id, file_name))
+try:
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        # 先に全タスクをsubmitし、futureオブジェクトをリスト化する
+        futures = [executor.submit(download_file, picture[0], picture[1]) for picture in pictures_to_download]
+        futures += [executor.submit(get_course_work_attachments, item) for item in course_works]
+        futures += [executor.submit(get_all_materials, item) for item in all_items]
+        
+        # as_completedで終わったものから取り出し、tqdmでラップする
+        results = []
+        for future in tqdm(as_completed(futures), total=len(futures), desc="ファイルを保存中"):
+            results.append(future.result())
 
-for item in announcements:
-    item["item_type"] = "Announcement"
-for item in course_work:
-    item["item_type"] = "CourseWork"
-for item in course_work_materials:
-    item["item_type"] = "CourseWorkMaterial"
-
-all_items = announcements + course_work + course_work_materials
-all_items.sort(key=lambda item: item['updateTime'], reverse=True)
+except KeyboardInterrupt:
+    stop_event.set()
 
 html = template.render(
     name=course["name"],
     section=course.get("section", ""),
     announcements=announcements,
-    course_work=course_work,
+    course_work=course_works,
     course_work_materials=course_work_materials,
     all_items=all_items
 )
 
 with open(f"{base_dir}/クラス_{course["name"]}.html", "w", encoding="utf-8") as f:
     f.write(html)
-
-from concurrent.futures import ThreadPoolExecutor
-
-for item in tqdm(drive_files_to_download, desc="ドライブファイルをダウンロード中"):
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        ex.map(lambda file: download_drive_file(file[0], file[1]), drive_files_to_download)
 
 print(f"完了しました。アーカイブは {base_dir} に出力されています。")

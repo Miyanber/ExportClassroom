@@ -210,3 +210,6 @@ __marimo__/
 credentials.json
 classroomArchive/*
 example.json
+archive_folder_id.txt
+
+.vscode/

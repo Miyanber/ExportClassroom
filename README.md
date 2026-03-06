@@ -1,2 +1,2 @@
-# ExportClassroom
-GoogleClassroom™のデータをPDFに書き出す。
+# ClassroomArchiver
+Export your Google Classroom into a fully browsable HTML archive.
