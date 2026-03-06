@@ -7,12 +7,23 @@
     <title>{{ course.name }} {{ course.section }}</title>
 </head>
 <body>
-    <div></div>
+    <header>
+        <h1>{{ course.name }}</h1>
+        {% if course.section %}
+        <p class="section">{{ course.section }}</p>
+        {% endif %}
+        {% if course.descriptionHeading %}
+        <p class="detail">{{ course.descriptionHeading }}</p>
+        {% endif %}
+        {% if course.description %}
+        <p class="detail">{{ course.description }}</p>
+        {% endif %}
+        {% if course.room %}
+        <p class="detail">教室: {{ course.room }}</p>
+        {% endif %}
+    </header>
 
     <section>
-        <h1>{{ course.name }}</h1>
-        {% if course.section %}<p class="section">{{ course.section }}</p>{% endif %}
-
         <h2 id="announcements">ストリーム</h2>
         {% for item in all_items %}
         <div class="announcement">

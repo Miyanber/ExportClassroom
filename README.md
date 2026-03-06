@@ -8,12 +8,12 @@ Export your Google Classroom into a fully browsable HTML archive.
 
 ## 注意事項
 
- 以下の内容はローカルに保存されません。ご注意ください。
+以下の内容はローカルに保存されません。ご注意ください。
 <ul>
+    <li>Google Forms</li>
     <li>投稿に対するコメント</li>
     <li>課題内の限定公開のコメント</li>
     <li>ドライブファイル内のコメント</li>
-    <li>Google Forms</li>
 </ul>
 　　
 

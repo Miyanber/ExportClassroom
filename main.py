@@ -200,7 +200,7 @@ def download_drive_file(file_id, filename):
                     fileId=file_id,
                     body={
                         "name": filename,
-                        "parents": [archive_folder_id]
+                        "parents": [archive_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
                     },
                     fields="id,name,webViewLink,mimeType"
                 ).execute()

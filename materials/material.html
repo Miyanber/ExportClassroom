@@ -6,13 +6,13 @@
         <p class="link-title">{{ drive_file.title }}</p>
         <p class="link-text">
             {% if drive_file.file_type_name %}{{ drive_file.file_type_name }}{% else %}ドライブファイル{% endif %}
-            {% if not drive_file.was_saved %}（ローカルに保存されていません）{% endif %}
+            {% if drive_file.was_saved %}（ローカル保存済み）{% endif %}
         </p>
     </a>
     {% else %}
     <a target="_blank" href="{{ drive_file.alternateLink }}">
         <p class="link-title">不明なファイル</p>
-        <p class="link-text">（ローカルに保存されていません）</p>
+        <p class="link-text">不明</p>
     </a>
     {% endif %}
     {% endwith %}
@@ -33,10 +33,9 @@
 </div>
 {% elif material.form %}
 <div class="form material">
-    ※フォームは保存されません。Googleアカウントが停止され次第、アクセスできなくなる可能性があります。
     <a target="_blank" href="{{ material.form.formUrl }}">
         <p class="link-title">{% if material.form.title %}{{ material.form.title }}{% else %}フォーム{% endif %}</p>
-        <p class="link-text">{{ material.form.formurl }}</p>
+        <p class="link-text">{{ material.form.formUrl }}</p>
     </a>
 </div>
 {% elif material.gem %}
