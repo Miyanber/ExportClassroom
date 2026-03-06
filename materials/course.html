@@ -21,6 +21,9 @@
         {% if course.room %}
         <p class="detail">教室: {{ course.room }}</p>
         {% endif %}
+        {% if course.subject %}
+        <p class="detail">科目: {{ course.subject }}</p>
+        {% endif %}
     </header>
 
     <section>
@@ -39,7 +42,13 @@
         <div class="announcement">
             <div class="header">
                 {% if item.item_type == "Announcement" %}
+                {% if item.creatorUserProfile.photoUrl %}
                 <img class="creator-photo" src="./img/icons/{{ item.creatorUserProfile.id }}.png" alt="アイコン">
+                {% else %}
+                <div class="icon-wrapper">
+                    <img class="icon" src="./img/user.svg" alt="アイコン">
+                </div>
+                {% endif %}
                 {% elif item.item_type == "CourseWork" %}
                 <div class="icon-wrapper">
                     <img class="icon" src="./img/assignment.svg" alt="アイコン">

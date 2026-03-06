@@ -1,21 +1,16 @@
 from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
-from jinja2 import Environment, FileSystemLoader
-
 from googleapiclient.http import MediaIoBaseDownload, HttpError
-import io
-import requests, os
+from googleapiclient.discovery import build
+from jinja2 import Environment, FileSystemLoader
 from datetime import datetime, timezone, timedelta
-
-import shutil
 from tqdm import tqdm
-
+import io, requests, os
 import signal
-import os
-signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
-
+import shutil
+import mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
 
 
 jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
@@ -32,6 +27,7 @@ os.makedirs(f"{base_dir}/img/icons", exist_ok=True)
 shutil.copy('materials/style.css', f"{base_dir}/css/style.css")
 shutil.copy('materials/assignment.svg', f"{base_dir}/img/assignment.svg")
 shutil.copy('materials/book.svg', f"{base_dir}/img/book.svg")
+shutil.copy('materials/user.svg', f"{base_dir}/img/user.svg")
 
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
@@ -154,72 +150,101 @@ def get_file_type_name(mime_type):
     elif mime_type == "application/pdf":
         return "PDF"
 
-
-# {mime_type': (None | str), 'was_saved': (bool)} を返す。
-def download_drive_file(file_id, filename):
+# (dict | None) を返す。
+# filename は sanitize 後のものを渡すこと！
+def download_drive_file(file_id, file_name):
     # 強制終了用
     if stop_event.is_set():
-        print(f"Cancelled: {filename}")
-        return {
-            "mime_type": None,
-            "was_saved": False
-        }
-
-    # 念のためファイル名に利用不可の文字が含まれていないかチェック
-    filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
+        print(f"Cancelled: {file_name}")
+        return None
 
     if not hasattr(thread_local, "drive_service"):
         thread_local.drive_service = build("drive", "v3", credentials=creds)
 
+    drive_service = thread_local.drive_service
 
-    path = f"{base_dir}/driveFiles/id_{file_id}_name_{filename}"
+    # 利用不可の文字を消す
+    file_name = re.sub(r'[\\/*?:"<>|]', "_", file_name)
+    file_name = file_name.replace("\n", " ")
+    file_name = file_name.rstrip(" .")
+
+    file_type = None
+    path = f"{base_dir}/driveFiles/id_{file_id}_name_{file_name}"
+
     if os.path.exists(path):
-        print(f"Skip (already exists): {filename}")
+        print(f"Skip (already exists): {file_name}")
+        mime_type = mimetypes.guess_file_type(file_name)[0]
+        if mime_type:
+            extension = mimetypes.guess_extension(mime_type)
+            file_type = extension.upper()[1:]
         return {
-            "mime_type": None,
+            "file_name": file_name,
+            "file_type": file_type,
             "was_saved": True
         }
     
-    drive_service = thread_local.drive_service
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.FileIO(path, "wb")
-    downloader = MediaIoBaseDownload(fh, request)
+    try:
+        file = drive_service.files().get(
+            fileId=file_id,
+            fields="name,mimeType,size"
+        ).execute()
 
-    done = False
-    while not done:
-        try:
-            status, done = downloader.next_chunk()
-            print(f"filename: {filename}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
-            return {
-                "mime_type": None,
-                "was_saved": True
-            }
-        except HttpError as error:
-            if error.status_code != 404:
-                file = drive_service.files().copy(
-                    fileId=file_id,
-                    body={
-                        "name": filename,
-                        "parents": [archive_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
-                    },
-                    fields="id,name,webViewLink,mimeType"
-                ).execute()
-                print(f"ダウンロードできなかったため、ドライブにコピーが作成されました。ファイル名: {file["name"]}, リンク: {file['webViewLink']}")
+        file_name = file["name"]
+        mime_type = file["mimeType"]
 
-                return {
-                    "mime_type": file["mimeType"],
-                    "web_view_link": file["webViewLink"],
-                    "was_saved": False
-                }
-            else:
-                print(f"Failed to download file; filename: {filename}; file_id: {file_id};")
-                print(error)
-                
-            done = True
-    return {
-        "mime_type": None,
-        "was_saved": False
-    }
+        extension = mimetypes.guess_extension(mime_type)
+        if extension:
+            file_type = extension.upper()[1:]
+
+        # 拡張子が必要な場合は付与
+        if "." not in file_name and not mime_type.startswith("application/vnd.google-apps"):
+            if extension:
+                file_name += extension
+        
+        # Google ファイル以外はダウンロード試行
+        if not mime_type.startswith("application/vnd.google-apps"):
+            request = drive_service.files().get_media(fileId=file_id)
+            fh = io.FileIO(path, "wb")
+            downloader = MediaIoBaseDownload(fh, request)
+
+            done = False
+            while not done:
+                try:
+                    status, done = downloader.next_chunk()
+                    print(f"filename: {file_name}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
+                    return {
+                        "file_name": file_name,
+                        "file_type": file_type,
+                        "was_saved": True
+                    }
+                except HttpError as error:
+                    if error.status_code == 404:
+                        print(f"Failed to download file; filename: {file_name}; file_id: {file_id};")
+                        print(error)
+                        return None
+        
+        # 404以外で失敗 or Google系ファイルの場合
+        file = drive_service.files().copy(
+            fileId=file_id,
+            body={
+                "name": file_name,
+                "parents": [archive_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
+            },
+            fields="id,name,webViewLink,mimeType"
+        ).execute()
+        print(f"ダウンロードできなかったため、ドライブにコピーが作成されました。ファイル名: {file["name"]}, リンク: {file['webViewLink']}")
+
+        return {
+            "file_name": file_name,
+            "file_type": file_type,
+            "was_saved": True,
+            "web_view_link": file["webViewLink"],
+        }
+
+    except HttpError as e:
+        print(f"Failed to download file; filename: {file_name}; file_id: {file_id};")
+        print(e)
+    return None
 
 
 def download_file(url, path):
@@ -236,7 +261,7 @@ def download_file(url, path):
 for course in courses:
     print(course)
     print(f"クラス名: {course["name"]}")
-    if course["name"] != "高３空理系（英コミュ・論国・数Ⅲ・数C・化学・物理）":
+    if course["name"] != "赤団(高１～３)":
         continue
 
     announcements = list_all(
@@ -315,16 +340,30 @@ for course in courses:
                 # テンプレートではMaterialと同様に扱う
                 attachment["driveFile"]["driveFile"] = attachment["driveFile"]
                 drive_file = attachment["driveFile"]["driveFile"]
-                if "title" in attachment["driveFile"]:
+                if "title" in drive_file:
                     file_dict = download_drive_file(drive_file["id"], drive_file["title"])
-                    drive_file["file_type_name"] = get_file_type_name(file_dict["mime_type"])
+                    drive_file["title"] = file_dict["file_name"] # 拡張子補完等のため必要
+                    drive_file["file_type"] = file_dict["file_type"]
                     drive_file["was_saved"] = file_dict["was_saved"]
                     if "web_view_link" in file_dict:
                         drive_file["web_view_link"] = file_dict["web_view_link"]
 
 
     def get_all_materials(item):
-        item["creatorUserProfile"] = user_profiles[item["creatorUserId"]]
+        if item["creatorUserId"] in user_profiles:
+            item["creatorUserProfile"] = user_profiles[item["creatorUserId"]]
+        else:
+            # エラー防止でダミーオブジェクト挿入
+            item["creatorUserProfile"] = {
+                "id": item["creatorUserId"],
+                "name": {
+                    "givenName": "不明ユーザー",
+                    "familyName": "",
+                    "fullName": "不明ユーザー"
+                },
+                "photoUrl": None,
+            }
+
         item["creationTime"] = get_jst_str(item["creationTime"])
         item["updateTime"] = get_jst_str(item["updateTime"])
         item["was_updated"] = item["creationTime"] != item["updateTime"]
@@ -336,7 +375,8 @@ for course in courses:
                 if "driveFile" in material and "title" in material["driveFile"]["driveFile"]:
                     drive_file = material["driveFile"]["driveFile"]
                     file_dict = download_drive_file(drive_file["id"], drive_file["title"])
-                    drive_file["file_type_name"] = get_file_type_name(file_dict["mime_type"])
+                    drive_file["title"] = file_dict["file_name"] # 拡張子補完等のため必要
+                    drive_file["file_type"] = file_dict["file_type"]
                     drive_file["was_saved"] = file_dict["was_saved"]
                     if "web_view_link" in file_dict:
                         drive_file["web_view_link"] = file_dict["web_view_link"]

@@ -5,7 +5,7 @@
     <a target="_blank" href="{% if drive_file.web_view_link %}{{ drive_file.web_view_link }}{% else %}driveFiles/id_{{ drive_file.id }}_name_{{ drive_file.title }}{% endif %}">
         <p class="link-title">{{ drive_file.title }}</p>
         <p class="link-text">
-            {% if drive_file.file_type_name %}{{ drive_file.file_type_name }}{% else %}ドライブファイル{% endif %}
+            {% if drive_file.file_type %}{{ drive_file.file_type }} ファイル{% else %}ドライブファイル{% endif %}
             {% if drive_file.was_saved %}（ローカル保存済み）{% endif %}
         </p>
     </a>
