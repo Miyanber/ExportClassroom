@@ -176,12 +176,28 @@ submission_map = {
     for s in submissions
 }
 
-# ローカル保存時は{'DriveFile': driveFile}}, ドライブにコピー時は{'File': file}, 保存失敗時は{}を返す。
+def get_file_type_name(mime_type):
+    if mime_type == None:
+        return None
+    elif mime_type == "application/vnd.google-apps.document":
+        return "Google ドキュメント"
+    elif mime_type == "application/vnd.google-apps.presentation":
+        return "Google スライド"
+    elif mime_type == "application/vnd.google-apps.spreadsheet":
+        return "Google スプレッドシート"
+    elif mime_type == "application/pdf":
+        return "PDF"
+    
+
+# {mime_type': (None | str), 'was_saved': (bool)} を返す。
 def download_drive_file(file_id, filename):
     # 強制終了用
     if stop_event.is_set():
         print(f"Cancelled: {filename}")
-        return {}
+        return {
+            "mime_type": None,
+            "was_saved": False
+        }
 
     # 念のためファイル名に利用不可の文字が含まれていないかチェック
     filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
@@ -194,10 +210,8 @@ def download_drive_file(file_id, filename):
     if os.path.exists(path):
         print(f"Skip (already exists): {filename}")
         return {
-            "DriveFile": {
-                "id": file_id,
-                "name": filename
-            }
+            "mime_type": None,
+            "was_saved": True
         }
     
     drive_service = thread_local.drive_service
@@ -211,10 +225,8 @@ def download_drive_file(file_id, filename):
             status, done = downloader.next_chunk()
             print(f"filename: {filename}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
             return {
-                "DriveFile": {
-                    "id": file_id,
-                    "name": filename
-                }
+                "mime_type": None,
+                "was_saved": True
             }
         except HttpError as error:
             if error.status_code != 404:
@@ -227,15 +239,21 @@ def download_drive_file(file_id, filename):
                     fields="id,name,webViewLink,mimeType"
                 ).execute()
                 print(f"ダウンロードできなかったため、ドライブにコピーが作成されました。ファイル名: {file["name"]}, リンク: {file['webViewLink']}")
+
                 return {
-                    "File": file
+                    "mime_type": file["mimeType"],
+                    "web_view_link": file["webViewLink"],
+                    "was_saved": False
                 }
             else:
                 print(f"Failed to download file; filename: {filename}; file_id: {file_id};")
                 print(error)
                 
             done = True
-    return {}
+    return {
+        "mime_type": None,
+        "was_saved": False
+    }
 
 
 def get_course_work_attachments(course_work):
@@ -255,29 +273,14 @@ def get_course_work_attachments(course_work):
             # Materialとのズレを修正するため
             # テンプレートではMaterialと同様に扱う
             attachment["driveFile"]["driveFile"] = attachment["driveFile"]
+            drive_file = attachment["driveFile"]["driveFile"]
             if "title" in attachment["driveFile"]:
-                file_id = attachment["driveFile"]["id"]
-                file_name = attachment["driveFile"]["title"]
-                file_dict = download_drive_file(file_id, file_name)
-                if "File" in file_dict:
-                    attachment["driveFile"]["driveFile"]["mimeType"] = file_dict["File"]["mimeType"]
-                    attachment["driveFile"]["driveFile"]["was_saved"] = True
-                elif "DriveFile" in file_dict:
-                    attachment["driveFile"]["driveFile"]["was_saved"] = True
-                else:
-                    attachment["driveFile"]["driveFile"]["was_saved"] = False
+                file_dict = download_drive_file(drive_file["id"], drive_file["title"])
+                drive_file["file_type_name"] = get_file_type_name(file_dict["mime_type"])
+                drive_file["was_saved"] = file_dict["was_saved"]
+                if "web_view_link" in file_dict:
+                    drive_file["web_view_link"] = file_dict["web_view_link"]
 
-
-for item in announcements:
-    item["item_type"] = "Announcement"
-for item in course_works:
-    item["item_type"] = "CourseWork"
-for item in course_work_materials:
-    item["item_type"] = "CourseWorkMaterial"
-
-all_items = announcements + course_works + course_work_materials
-# get_jst_str(item["creationTime"]) で変換する前に実行する必要あり
-all_items.sort(key=lambda item: item['updateTime'], reverse=True)
 
 def get_all_materials(item):
     item["creatorUserProfile"] = user_profiles[item["creatorUserId"]]
@@ -290,16 +293,25 @@ def get_all_materials(item):
     if "materials" in item:
         for material in item["materials"]:
             if "driveFile" in material and "title" in material["driveFile"]["driveFile"]:
-                file_id = material["driveFile"]["driveFile"]["id"]
-                file_name = material["driveFile"]["driveFile"]["title"]
-                file = download_drive_file(file_id, file_name)
-                if "File" in file:
-                    material["driveFile"]["driveFile"]["mimeType"] = file["File"]["mimeType"]
-                    material["driveFile"]["driveFile"]["was_saved"] = True
-                elif "DriveFile" in file:
-                    material["driveFile"]["driveFile"]["was_saved"] = True
-                else:
-                    material["driveFile"]["driveFile"]["was_saved"] = False
+                drive_file = material["driveFile"]["driveFile"]
+                file_dict = download_drive_file(drive_file["id"], drive_file["title"])
+                drive_file["file_type_name"] = get_file_type_name(file_dict["mime_type"])
+                drive_file["was_saved"] = file_dict["was_saved"]
+                if "web_view_link" in file_dict:
+                    drive_file["web_view_link"] = file_dict["web_view_link"]
+
+
+for item in announcements:
+    item["item_type"] = "Announcement"
+for item in course_works:
+    item["item_type"] = "CourseWork"
+for item in course_work_materials:
+    item["item_type"] = "CourseWorkMaterial"
+
+
+all_items = announcements + course_works + course_work_materials
+# get_jst_str(item["creationTime"]) で変換する前に実行する必要あり
+all_items.sort(key=lambda item: item['updateTime'], reverse=True)
 
 
 def download_file(url, path):

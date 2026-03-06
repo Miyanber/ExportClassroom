@@ -1,17 +1,22 @@
 {% if material.driveFile %}
 <div class="driveFile material">
-    <a target="_blank" href="driveFiles/id_{{ material.driveFile.driveFile.id }}_name_{{ material.driveFile.driveFile.title }}">
-        {% if material.driveFile.driveFile.title %}
-        <p class="link-title">{{ material.driveFile.driveFile.title }}</p>
+    {% with drive_file=material.driveFile.driveFile %}
+    {% if drive_file.title %}
+    <a target="_blank" href="{% if drive_file.web_view_link %}{{ drive_file.web_view_link }}{% else %}driveFiles/id_{{ drive_file.id }}_name_{{ drive_file.title }}{% endif %}">
+        <p class="link-title">{{ drive_file.title }}</p>
         <p class="link-text">
-            {% if material.driveFile.driveFile.mimeType %}{{ material.driveFile.driveFile.mimeType }}{% else %}ドライブファイル{% endif %}
-            {% if not material.driveFile.driveFile.was_saved %}（ローカル保存不可）{% endif %}
+            {% if drive_file.file_type_name %}{{ drive_file.file_type_name }}{% else %}ドライブファイル{% endif %}
+            {% if not drive_file.was_saved %}（ローカルに保存されていません）{% endif %}
         </p>
-        {% else %}
-        <p class="link-title">ドライブファイル</p>
-        <p class="link-text">不明</p>
         {% endif %}
     </a>
+    {% else %}
+    <a target="_blank" href="{{ drive_file.alternateLink }}">
+        <p class="link-title">不明なファイル</p>
+        <p class="link-text">（ローカルに保存されていません）</p>
+    </a>
+    {% endif %}
+    {% endwith %}
 </div>
 {% elif material.youtubeVideo %}
 <div class="youtubeVideo material">
@@ -29,7 +34,7 @@
 </div>
 {% elif material.form %}
 <div class="form material">
-    ※フォームは保存されません。Googleアカウントが停止され次第、アクセスできなくなります。
+    ※フォームは保存されません。Googleアカウントが停止され次第、アクセスできなくなる可能性があります。
     <a target="_blank" href="{{ material.form.formUrl }}">
         <p class="link-title">{% if material.form.title %}{{ material.form.title }}{% else %}フォーム{% endif %}</p>
         <p class="link-text">{{ material.form.formurl }}</p>
