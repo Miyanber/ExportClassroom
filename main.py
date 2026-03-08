@@ -115,7 +115,8 @@ try:
         q=query,
         spaces='drive',
         fields='files(id, name)', # 必要なフィールドだけ取得
-        pageSize=10
+        pageSize=10,
+        supportsAllDrives=True,
     ).execute()
     
     items = results.get('files', [])
@@ -126,7 +127,7 @@ try:
             "name": "Classroom Archive",
             "mimeType": "application/vnd.google-apps.folder",
         }
-        file = drive_service.files().create(body=file_metadata, fields="id").execute()
+        file = drive_service.files().create(body=file_metadata, fields="id", supportsAllDrives=True,).execute()
         root_folder_id = file.get("id")
     else:
         # 複数ヒットする可能性があるため、最初の一つを返す
@@ -139,7 +140,7 @@ try:
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [root_folder_id],
     }
-    file = drive_service.files().create(body=file_metadata, fields="id").execute()
+    file = drive_service.files().create(body=file_metadata, fields="id", supportsAllDrives=True, ).execute()
     archive_folder_id = file.get("id")
     
 except HttpError as error:
@@ -400,7 +401,8 @@ def copy_drive_file(course_folder_id, file_id, file_name):
                 "name": file_name,
                 "parents": [course_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
             },
-            fields="id,name,webViewLink,mimeType"
+            fields="id,name,webViewLink,mimeType",
+            supportsAllDrives=True,
         ).execute()
         log_debug(f"Copied file: {copied_file}")
     except HttpError as error:
