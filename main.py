@@ -334,7 +334,7 @@ def fetch_drive_file_details(drive_file):
         elif not file["capabilities"]["canCopy"]:
             log_info(f"ファイルのコピーが許可されていません。ファイル名: {file_name}, リンク: {drive_file['alternateLink']}")
         else:
-            log_info(f"ダウンロード・コピー両方できないファイル形式です。ファイル名: {file_name}, リンク: {drive_file['alternateLink']}")
+            log_info(f"ダウンロード・コピーが両方できないファイル形式です。ファイル名: {file_name}, リンク: {drive_file['alternateLink']}")
             log_debug(f"Failed to get file information; drive_file: {drive_file};", exc_info=True)
         return None
 
@@ -375,7 +375,7 @@ def download_drive_file(file_id, file_name):
         done = False
         while not done:
             status, done = downloader.next_chunk()
-            # log_info(f"filename: {file_name}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
+            log_debug(f"Downloading file... filename: {file_name}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
     except HttpError as error:
         log_warning(f"ファイル（{file_name}）をダウンロードできませんでした。ファイルID: {file_id}, ステータスコード: {error.status_code}")
         log_debug(f"Failed to download file; filename: {file_name}; file_id: {file_id}; error: {error}")
@@ -402,9 +402,10 @@ def copy_drive_file(course_folder_id, file_id, file_name):
             },
             fields="id,name,webViewLink,mimeType"
         ).execute()
-        log_info(f"ダウンロードできないファイル形式のため、マイドライブにコピーが作成されました。ファイル名: {copied_file["name"]}, リンク: {copied_file['webViewLink']}")
+        log_debug(f"Copied file: {copied_file}")
     except HttpError as error:
-        log_warning(f"Failed to copy file; filename: {file_name}; file_id: {file_id}; error: {error}")
+        log_warning(f"ファイル（{file_name}）をコピーできませんでした。ファイルID: {file_id}, ステータスコード: {error.status_code}")
+        log_debug(f"Failed to copy file; filename: {file_name}; file_id: {file_id}; error: {error}")
 
 
 def fetch_drive_folder_details_recursive(parent_folder_id, source_folder_id, source_folder_name):
@@ -417,7 +418,7 @@ def fetch_drive_folder_details_recursive(parent_folder_id, source_folder_id, sou
         log_warning(f"Cancelled: {source_folder_name}")
         return set()
     
-    log_info(f"フォルダを作成中: {source_folder_name}")
+    log_debug(f"Creating a folder: {source_folder_name}")
     
     new_folder_metadata = {
         'name': source_folder_name,
@@ -433,8 +434,8 @@ def fetch_drive_folder_details_recursive(parent_folder_id, source_folder_id, sou
         ).execute()
         new_folder_id = new_folder.get('id')
     except Exception as e:
-        log_error(f"フォルダ作成失敗: {source_folder_name}")
-        logger.debug(f"詳細: {e}", exc_info=True)
+        log_error(f"フォルダ作成に失敗しました: {source_folder_name}")
+        log_debug(f"詳細: {e}", exc_info=True)
         return set()
 
     query = f"'{source_folder_id}' in parents and trashed = false"
@@ -472,7 +473,7 @@ def fetch_drive_folder_details_recursive(parent_folder_id, source_folder_id, sou
             child_files = fetch_drive_folder_details_recursive(new_folder_id, item_id, item_name)
             drive_files_to_copy |= child_files
         else:
-            log_debug(f"コピー対象追加: {item_name}")
+            log_debug(f"コピー対象追加: {item}")
             # ファイルならコピー対象に含める
             drive_files_to_copy.add((new_folder_id, item_id, item_name))
 
@@ -488,8 +489,7 @@ for course in courses:
         log_warning(f"Cancelled: {course}")
         exit()
     
-    if course["name"] != "高校３年７組":
-        continue
+    log_debug(f"Course: {course}")
 
     # クラス用フォルダをドライブに作成
     folder_metadata = {
