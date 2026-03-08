@@ -10,6 +10,7 @@ import shutil
 import time
 import mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
 
@@ -300,10 +301,8 @@ def fetch_drive_file_details(drive_file):
     else:
         file_type = get_file_type_name(mime_type)
 
-    _, name_extension = os.path.splitext(file_name)
-
     # 拡張子が必要な場合は付与
-    if drive_extension and name_extension != drive_extension and not mime_type.startswith("application/vnd.google-apps"):
+    if drive_extension and not file_name.lower().endswith(drive_extension.lower()) and not mime_type.startswith("application/vnd.google-apps"):
         file_name += drive_extension
 
     if mime_type == "application/vnd.google-apps.folder":
