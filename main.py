@@ -7,6 +7,7 @@ from tqdm import tqdm
 import io, requests, os, sys
 import signal
 import shutil
+import time
 import mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -98,7 +99,6 @@ template = env.get_template("course.html")
 archive_folder_id = None
 
 try:
-    file_name = "archive_folder_id.txt"
     drive_service = build("drive", "v3", credentials=creds)
 
     folder_name = "Classroom Archive"
@@ -182,11 +182,13 @@ import re
 stop_event = threading.Event()
 
 user_profiles = {}
-pictures_to_download = set()
+all_icons_to_download = set()
 all_drive_files_to_download = set()
 all_drive_files_to_copy = set()
+all_drive_folders_to_copy = set()
 all_files_to_download_size = 0
 file_cache = {}
+course_folders = {}
 
 # 1GBの閾値 (バイト単位)
 THRESHOLD_GB = 1 * 1024 * 1024 * 1024
@@ -304,8 +306,12 @@ def fetch_drive_file_details(drive_file):
         file_name += drive_extension
 
     if mime_type == "application/vnd.google-apps.folder":
-        log_info(f"フォルダはダウンロード・コピーできません。フォルダ名: {file_name}, リンク: {drive_file['alternateLink']}")
-        return None
+        return {
+            "file_name": file_name,
+            "file_type": "ドライブフォルダ",
+            "save_type": "copy (folder)",
+            "size": 0,
+        }
 
     elif mime_type.startswith("application/vnd.google-apps.") and file["capabilities"]["canCopy"]:
         return {
@@ -371,11 +377,12 @@ def download_drive_file(file_id, file_name):
             status, done = downloader.next_chunk()
             # log_info(f"filename: {file_name}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
     except HttpError as error:
-        log_warning(f"Failed to download file; filename: {file_name}; file_id: {file_id}; error: {error}")
+        log_warning(f"ファイル（{file_name}）をダウンロードできませんでした。ファイルID: {file_id}, ステータスコード: {error.status_code}")
+        log_debug(f"Failed to download file; filename: {file_name}; file_id: {file_id}; error: {error}")
         done = True
+    
 
-
-def copy_drive_file(file_id, file_name):
+def copy_drive_file(course_folder_id, file_id, file_name):
     # 強制終了用
     if stop_event.is_set():
         log_warning(f"Cancelled: {file_name}")
@@ -391,14 +398,86 @@ def copy_drive_file(file_id, file_name):
             fileId=file_id,
             body={
                 "name": file_name,
-                "parents": [archive_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
+                "parents": [course_folder_id] # Apps Script (.gs) は親フォルダ指定無視でドライブ直下に保存される
             },
             fields="id,name,webViewLink,mimeType"
         ).execute()
         log_info(f"ダウンロードできないファイル形式のため、マイドライブにコピーが作成されました。ファイル名: {copied_file["name"]}, リンク: {copied_file['webViewLink']}")
     except HttpError as error:
         log_warning(f"Failed to copy file; filename: {file_name}; file_id: {file_id}; error: {error}")
-        done = True
+
+
+def fetch_drive_folder_details_recursive(parent_folder_id, source_folder_id, source_folder_name):
+    """
+    フォルダ構造を再帰的に取得し、コピーすべきファイルのセットを取得する
+    キャンセルされたり失敗した場合は空のセットを返す
+    """
+    # 強制終了用
+    if stop_event.is_set():
+        log_warning(f"Cancelled: {source_folder_name}")
+        return set()
+    
+    log_info(f"フォルダを作成中: {source_folder_name}")
+    
+    new_folder_metadata = {
+        'name': source_folder_name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [parent_folder_id]
+    }
+    
+    try:
+        new_folder = drive_service.files().create(
+            body=new_folder_metadata, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        new_folder_id = new_folder.get('id')
+    except Exception as e:
+        log_error(f"フォルダ作成失敗: {source_folder_name}")
+        logger.debug(f"詳細: {e}", exc_info=True)
+        return set()
+
+    query = f"'{source_folder_id}' in parents and trashed = false"
+    items = []
+    page_token = None
+    
+    while True:
+        try:
+            response = drive_service.files().list(
+                q=query,
+                spaces='drive',
+                fields='nextPageToken, files(id, name, mimeType)',
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+            items.extend(response.get('files', []))
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+        except HttpError as e:
+            logger.debug(f"詳細: {e}", exc_info=True)
+            items = []
+            break
+
+    drive_files_to_copy = set()
+
+    for item in items:
+        item_id = item['id']
+        item_name = item['name']
+        item_mime = item['mimeType']
+
+        if item_mime == 'application/vnd.google-apps.folder':
+            # 子フォルダなら再帰呼び出し
+            child_files = fetch_drive_folder_details_recursive(new_folder_id, item_id, item_name)
+            drive_files_to_copy |= child_files
+        else:
+            log_debug(f"コピー対象追加: {item_name}")
+            # ファイルならコピー対象に含める
+            drive_files_to_copy.add((new_folder_id, item_id, item_name))
+
+    return drive_files_to_copy
+
 
 courses_to_archive = []
 
@@ -409,43 +488,84 @@ for course in courses:
         log_warning(f"Cancelled: {course}")
         exit()
     
+    if course["name"] != "高校３年７組":
+        continue
+
+    # クラス用フォルダをドライブに作成
+    folder_metadata = {
+        'name': course["name"],
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [archive_folder_id]
+    }
+    try:
+        course_folder = drive_service.files().create(
+            body=folder_metadata, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        course_folder_id = course_folder.get('id')
+        course_folders[course["id"]] = {
+            "folder_id": course_folder_id,
+            "folder_name": course["name"]
+        }
+    except HttpError as e:
+        log_error(f"{course["name"]} のドライブフォルダ作成に失敗しました。このクラスをアーカイブ対象から除外します。")
+        logger.debug(f"course: {course}; 詳細: {e}", exc_info=True)
+        continue
+
     drive_files_to_copy = set()
     drive_files_to_download = set()
+    drive_folders_to_copy = set()
+    icons_to_download = set()
     files_to_download_size = 0
 
-    announcements = list_all(
-        lambda **kwargs: service.courses().announcements().list(courseId=course["id"], **kwargs),
-        "announcements"
-    )
-    course_works = list_all(
-        lambda **kwargs: service.courses().courseWork().list(courseId=course["id"], **kwargs),
-        "courseWork"
-    )
-    course_work_materials = list_all(
-        lambda **kwargs: service.courses().courseWorkMaterials().list(courseId=course["id"], **kwargs),
-        "courseWorkMaterial"
-    )
-    teachers = list_all(
-        lambda **kwargs: service.courses().teachers().list(courseId=course["id"], **kwargs),
-        "teachers"
-    )
-    students = list_all(
-        lambda **kwargs: service.courses().students().list(courseId=course["id"], **kwargs),
-        "students"
-    )
-    topics = list_all(
-        lambda **kwargs: service.courses().topics().list(courseId=course["id"], **kwargs),
-        "topic"
-    )
-    submissions = list_all(
-        lambda **kwargs: service.courses().courseWork().studentSubmissions().list(
-            courseId=course["id"],
-            courseWorkId="-",
-            userId="me",
-            **kwargs
-        ),
-        "studentSubmissions"
-    )
+    def fetch_course_data(course_id):
+        # API呼び出しの定義をリスト化
+        tasks = {
+            "announcements": lambda: list_all(lambda **kw: service.courses().announcements().list(courseId=course_id, **kw), "announcements"),
+            "course_works": lambda: list_all(lambda **kw: service.courses().courseWork().list(courseId=course_id, **kw), "courseWork"),
+            "course_work_materials": lambda: list_all(lambda **kw: service.courses().courseWorkMaterials().list(courseId=course_id, **kw), "courseWorkMaterial"),
+            "teachers": lambda: list_all(lambda **kw: service.courses().teachers().list(courseId=course_id, **kw), "teachers"),
+            "students": lambda: list_all(lambda **kw: service.courses().students().list(courseId=course_id, **kw), "students"),
+            "topics": lambda: list_all(lambda **kw: service.courses().topics().list(courseId=course_id, **kw), "topic"),
+            "submissions": lambda: list_all(lambda **kw: service.courses().courseWork().studentSubmissions().list(courseId=course_id, courseWorkId="-", userId="me", **kw), "studentSubmissions")
+        }
+
+        results = {}
+        # 7本のリクエストを並列実行
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future_to_key = {executor.submit(func): key for key, func in tasks.items()}
+            for future in future_to_key:
+                key = future_to_key[future]
+                try:
+                    results[key] = future.result()
+                except Exception as e:
+                    log_error(f"{key} の取得に失敗しました。詳細はログに記載しています。")
+                    log_debug(e, exc_info=True)
+                    results[key] = [] # 失敗時は空リスト
+                    
+        return results
+
+    data = fetch_course_data(course["id"])
+    announcements = data["announcements"]
+    course_works = data["course_works"]
+    course_work_materials = data["course_work_materials"]
+    teachers = data["teachers"]
+    students = data["students"]
+    topics = data["topics"]
+    submissions = data["submissions"]
+    
+    for user in list(teachers + students):
+        if user["userId"] in user_profiles:
+            continue
+        profile = user["profile"]
+        user_profiles[user["userId"]] = profile
+        if "photoUrl" in profile:
+            path = f"{base_dir}/img/icons/{profile["id"]}.png"
+            if os.path.exists(path):
+                log_info(f"Skip (already exists): {path};")
+            else:
+                icons_to_download.add((f"https:{profile["photoUrl"]}", path))
 
     # 授業のトピック
     topic_map = {
@@ -490,7 +610,9 @@ for course in courses:
                         drive_file["size"] = file_detail["size"]
                         files_to_download_size += file_detail["size"]
                         if drive_file["save_type"] == "copy":
-                            drive_files_to_copy.add((drive_file["id"], drive_file["title"]))
+                            drive_files_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
+                        elif drive_file["save_type"] == "copy (folder)":
+                            drive_folders_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
                         elif drive_file["save_type"] == "download":
                             drive_files_to_download.add((drive_file["id"], drive_file["title"]))
                         else:
@@ -533,11 +655,18 @@ for course in courses:
                         drive_file["size"] = file_detail["size"]
                         files_to_download_size += file_detail["size"]
                         if drive_file["save_type"] == "copy":
-                            drive_files_to_copy.add((drive_file["id"], drive_file["title"]))
+                            drive_files_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
+                        elif drive_file["save_type"] == "copy (folder)":
+                            drive_folders_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
                         elif drive_file["save_type"] == "download":
                             drive_files_to_download.add((drive_file["id"], drive_file["title"]))
                         else:
                             log_warning(f"Unsupported save type. DriveFile: {drive_file}")
+
+    def folders_to_files(folders):
+        global drive_files_to_copy
+        for folder in folders:
+            drive_files_to_copy |= fetch_drive_folder_details_recursive(folder[0], folder[1], folder[2])
 
     for item in announcements:
         item["item_type"] = "Announcement"
@@ -557,6 +686,7 @@ for course in courses:
             futures = [executor.submit(get_course_work_attachments, item) for item in course_works]
             futures += [executor.submit(get_all_materials, item) for item in all_items]
             futures += [executor.submit(clean_item, item) for item in all_items]
+            futures += [executor.submit(folders_to_files, drive_folders_to_copy)]
             
             # as_completedで終わったものから取り出し、tqdmでラップする
             results = []
@@ -570,6 +700,7 @@ for course in courses:
     log_info(f"クラス名: {course["name"]}")
     log_info(f"投稿（お知らせ・課題・資料）の合計数: {len(all_items)}")
     log_info(f"ドライブへコピー対象のファイル数: {len(drive_files_to_copy)}")
+    log_info(f"ドライブへコピー対象のフォルダ数: {len(drive_folders_to_copy)}")
     log_info(f"ダウンロード対象ファイルの数: {len(drive_files_to_download)}")
     log_info(f"合計サイズ（ダウンロード対象のみ）: {format_size(files_to_download_size)}")
     log_info("==============================\n")
@@ -586,21 +717,11 @@ for course in courses:
     else:
         log_info("ダウンロード対象ファイルの合計サイズが1GB未満のため、自動的にアーカイブ対象に登録します。")
         courses_to_archive.append(course)
-    
-    for user in list(teachers + students):
-        if user["userId"] in user_profiles:
-            continue
-        profile = user["profile"]
-        user_profiles[user["userId"]] = profile
-        if "photoUrl" in profile:
-            path = f"{base_dir}/img/icons/{profile["id"]}.png"
-            if os.path.exists(path):
-                log_info(f"Skip (already exists): {path};")
-            else:
-                pictures_to_download.add((f"https:{profile["photoUrl"]}", path))
 
     all_drive_files_to_copy |= drive_files_to_copy
     all_drive_files_to_download |= drive_files_to_download
+    all_drive_folders_to_copy |= drive_folders_to_copy
+    all_icons_to_download |= icons_to_download
     all_files_to_download_size += files_to_download_size
 
     html = template.render(
@@ -617,9 +738,9 @@ for course in courses:
     with open(f"{base_dir}/クラス_{course["name"]}.html", "w", encoding="utf-8") as f:
         f.write(html)
 
-log_info("アーカイブ対象のクラスが確定しました。")
 
-log_info("\n==============================")
+log_info("\nアーカイブ対象のクラスが確定しました。")
+log_info("==============================")
 log_info("アーカイブ対象のクラス: ")
 for course in courses_to_archive:
     log_info(f"- {course["name"]}")
@@ -638,9 +759,9 @@ if confirm != "y":
 
 try:
     with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [executor.submit(download_file, picture[0], picture[1]) for picture in pictures_to_download]
-        futures += [executor.submit(copy_drive_file, file[0], file[1]) for file in drive_files_to_copy]
-        futures += [executor.submit(download_drive_file, file[0], file[1]) for file in drive_files_to_download]
+        futures = [executor.submit(download_file, picture[0], picture[1]) for picture in all_icons_to_download]
+        futures += [executor.submit(copy_drive_file, file[0], file[1], file[2]) for file in all_drive_files_to_copy]
+        futures += [executor.submit(download_drive_file, file[0], file[1]) for file in all_drive_files_to_download]
         
         results = []
         for future in tqdm(as_completed(futures), total=len(futures), desc=f"ファイルを保存中"):
