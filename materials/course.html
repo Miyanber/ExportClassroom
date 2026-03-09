@@ -8,22 +8,24 @@
 </head>
 <body>
     <header>
-        <h1>{{ course.name }}</h1>
-        {% if course.section %}
-        <p class="section">{{ course.section }}</p>
-        {% endif %}
-        {% if course.descriptionHeading %}
-        <p class="detail">{{ course.descriptionHeading }}</p>
-        {% endif %}
-        {% if course.description %}
-        <p class="detail">{{ course.description }}</p>
-        {% endif %}
-        {% if course.room %}
-        <p class="detail">教室: {{ course.room }}</p>
-        {% endif %}
-        {% if course.subject %}
-        <p class="detail">科目: {{ course.subject }}</p>
-        {% endif %}
+        <div class="course_header">
+            <h1>{{ course.name }}</h1>
+            {% if course.section %}
+            <p class="section">{{ course.section }}</p>
+            {% endif %}
+            {% if course.descriptionHeading %}
+            <p class="detail">{{ course.descriptionHeading }}</p>
+            {% endif %}
+            {% if course.description %}
+            <p class="detail">{{ course.description }}</p>
+            {% endif %}
+            {% if course.room %}
+            <p class="detail">教室: {{ course.room }}</p>
+            {% endif %}
+            {% if course.subject %}
+            <p class="detail">科目: {{ course.subject }}</p>
+            {% endif %}
+        </div>
     </header>
 
     <section>
