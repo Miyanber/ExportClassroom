@@ -743,12 +743,19 @@ def main():
                 futures = [executor.submit(get_course_work_attachments, item) for item in course_works]
                 futures += [executor.submit(get_all_materials, item) for item in all_items]
                 futures += [executor.submit(clean_item, item) for item in all_items]
-                futures += [executor.submit(folders_to_files, drive_folders_to_copy)]
                 
                 # as_completedで終わったものから取り出し、tqdmでラップする
                 results = []
                 for future in tqdm(as_completed(futures), total=len(futures), desc=f"{course["name"]}の情報を取得中(2)"):
                     results.append(future.result())
+
+            # フォルダの中身取得
+            if len(drive_files_to_copy) > 0:
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    futures = [executor.submit(folders_to_files, list(drive_folders_to_copy))]
+                    results = []
+                    for future in tqdm(as_completed(futures), total=len(futures), desc=f"{course["name"]}の情報を取得中(3)"):
+                        results.append(future.result())
 
         except KeyboardInterrupt:
             stop_event.set()
@@ -829,7 +836,7 @@ def main():
     log_info(f"ダウンロード対象ファイルの合計容量: {format_size(all_files_to_download_size)}")
     log_info("==============================")
 
-    confirm = input("ファイルのダウンロードを開始しますか？ (y/N): ").strip().lower()
+    confirm = input("アーカイブを開始しますか？ (y/N): ").strip().lower()
 
     if confirm != "y":
         log_warning("処理を中止しました。")
