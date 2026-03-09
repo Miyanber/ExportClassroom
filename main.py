@@ -18,6 +18,9 @@ while True:
     result = input(" > ")
     if result == "":
         print("新しくアーカイブを作成します。")
+        jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
+        jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
+        archive_date = jst_today_str
         break
     elif result.isdigit() and len(result) == 14:
         archive_date = result
@@ -28,14 +31,6 @@ while True:
 
 
 signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
-
-# 引数に過去の日付(YYYYMMDDHHMMSS)を指定できる
-if len(sys.argv) > 1:
-    archive_date = sys.argv[1]
-else:
-    jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
-    jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
-    archive_date = jst_today_str
 
 base_dir = f"classroomArchive/{archive_date}"
 
