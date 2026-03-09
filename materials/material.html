@@ -2,7 +2,7 @@
 <div class="driveFile material">
     {% with drive_file=material.driveFile.driveFile %}
     {% if drive_file.title %}
-    <a target="_blank" href="{% if drive_file.save_type != "download" or drive_file.save_type != "download (skipped)" %}{{ drive_file.alternateLink }}{% else %}driveFiles/id_{{ drive_file.id }}_name_{{ drive_file.title }}{% endif %}">
+    <a target="_blank" href="{% if drive_file.save_type != "download" and drive_file.save_type != "download (skipped)" %}{{ drive_file.alternateLink }}{% else %}driveFiles/id_{{ drive_file.id }}_name_{{ drive_file.title }}{% endif %}">
         <p class="link-title">{{ drive_file.title }}</p>
         <p class="link-text">
             {% if drive_file.file_type %}{{ drive_file.file_type }}{% else %}ドライブファイル{% endif %}
