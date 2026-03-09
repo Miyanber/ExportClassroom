@@ -518,9 +518,6 @@ for course in courses:
     
     log_debug(f"Course: {course}")
 
-    if course["name"] != "高３物理（袴田先生）":
-        continue
-
     # クラス用フォルダをドライブに作成
     folder_metadata = {
         'name': course["name"],
