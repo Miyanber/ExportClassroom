@@ -24,7 +24,7 @@ init(autoreset=True)
 jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
 jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
 
-log_dir = os.path.join("./logs", "logs")
+log_dir = "./logs"
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"{jst_today_str}.log")
 
