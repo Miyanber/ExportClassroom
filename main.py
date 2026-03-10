@@ -14,6 +14,45 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import questionary
 
+# ロギングの設定
+import logging
+from colorama import init, Fore, Style
+
+# coloramaの初期化（WindowsのANSIエスケープシーケンス対応）
+init(autoreset=True)
+
+jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
+jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
+
+log_dir = os.path.join("./logs", "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, f"{jst_today_str}.log")
+
+logger = logging.getLogger("ClassroomArchiver")
+logger.setLevel(logging.DEBUG)
+
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
+file_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+file_handler.setFormatter(file_formatter)
+
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+def log_info(msg):
+    logger.info(msg)
+
+def log_error(msg):
+    logger.error(f"{Fore.RED}{msg}{Style.RESET_ALL}", exc_info=True)
+
+def log_warning(msg):
+    logger.warning(f"{Fore.YELLOW}{msg}{Style.RESET_ALL}")
+
+def log_debug(msg, exc_info=False):
+    logger.debug(msg, exc_info=exc_info)
+
 def main():
     create_new = True
     p = Path("./classroomArchive")
@@ -28,12 +67,10 @@ def main():
                 choices=folders
             ).ask()
             archive_date = selected
-            print(f"アーカイブ: {archive_date} を利用します。")
+            log_info(f"アーカイブ: {archive_date} を利用します。")
     if create_new:
-        jst_today = datetime.now().astimezone(timezone(timedelta(hours=9)))
-        jst_today_str = jst_today.strftime("%Y%m%d%H%M%S")
         archive_date = jst_today_str
-        print(f"アーカイブ: {archive_date} を新しく作成します。")
+        log_info(f"アーカイブ: {archive_date} を新しく作成します。")
 
     base_dir = f"classroomArchive/{archive_date}"
     
@@ -41,42 +78,8 @@ def main():
 
     signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
 
-    # ロギングの設定
-    import logging
-    from colorama import init, Fore, Style
 
-    # coloramaの初期化（WindowsのANSIエスケープシーケンス対応）
-    init(autoreset=True)
-
-    log_dir = os.path.join(base_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"{archive_date}.log")
-
-    logger = logging.getLogger("ClassroomArchiver")
-    logger.setLevel(logging.DEBUG)
-
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-    file_handler.setFormatter(file_formatter)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    def log_info(msg):
-        logger.info(msg)
-
-    def log_error(msg):
-        logger.error(f"{Fore.RED}{msg}{Style.RESET_ALL}", exc_info=True)
-
-    def log_warning(msg):
-        logger.warning(f"{Fore.YELLOW}{msg}{Style.RESET_ALL}")
-
-    def log_debug(msg, exc_info=False):
-        logger.debug(msg, exc_info=exc_info)
-
+    log_debug(f"保存先: {Path(base_dir).resolve()}")
 
     log_info("\nOAuth認証を行います。ClassroomをアーカイブするGoogleアカウントでログインして下さい。")
 
@@ -130,7 +133,7 @@ def main():
                 # 403 (Rate Limit) や 429 (Too Many Requests) を判定
                 if error.resp.status in [403, 429]:
                     wait_time = (2 ** n)  # 指数バックオフ
-                    print(f"レート制限(status:{error.resp.status})が発生。{wait_time}秒待機して再試行します...")
+                    log_warning(f"レート制限(status:{error.resp.status})が発生。{wait_time}秒待機して再試行します...")
                     time.sleep(wait_time)
                 else:
                     raise error
@@ -514,7 +517,7 @@ def main():
                 if not page_token:
                     break
             except HttpError as e:
-                logger.debug(f"詳細: {e}", exc_info=True)
+                log_debug(f"詳細: {e}", exc_info=True)
                 items = []
                 break
 
@@ -776,10 +779,10 @@ def main():
                 log_info(f"- {item[1]}")
             log_info(f"100MBを超えているファイルの合計サイズ: {format_size(large_drive_files_size)}")
 
-            print("\nオプションを選んでください:")
-            print(f"[1] 全てダウンロード ({format_size(files_to_download_size)})")
-            print(f"[2] 100MB以上のファイルを除外してダウンロード ({format_size(files_to_download_size - large_drive_files_size)})")
-            print("[3] このクラスをアーカイブ対象から除外する")
+            log_info("\nオプションを選んでください:")
+            log_info(f"[1] 全てダウンロード ({format_size(files_to_download_size)})")
+            log_info(f"[2] 100MB以上のファイルを除外してダウンロード ({format_size(files_to_download_size - large_drive_files_size)})")
+            log_info("[3] このクラスをアーカイブ対象から除外する")
 
             def choice_input():
                 while True:
@@ -856,16 +859,17 @@ def main():
     except KeyboardInterrupt:
         stop_event.set()
 
-    log_info(f"完了しました。アーカイブは {base_dir} に出力されています。")
+    log_info(f"\nアーカイブが完了しました。\nアーカイブは {Path(base_dir).resolve()} に出力されています。")
+    input("\nEnterキーを押すと終了します...")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print("\n" + "="*50)
-        print("予期せぬエラーが発生しました：")
+        log_info("\n" + "="*50)
+        log_info("予期せぬエラーが発生しました：")
         import traceback
         traceback.print_exc() # 詳細なエラー箇所を表示
-        print("="*50)
+        log_info("="*50)
         input("\nEnterキーを押すと終了します...") # これで画面が消えない
