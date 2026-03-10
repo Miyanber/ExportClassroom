@@ -871,5 +871,6 @@ if __name__ == "__main__":
         log_info("予期せぬエラーが発生しました：")
         import traceback
         traceback.print_exc() # 詳細なエラー箇所を表示
+        log_debug(f"詳細: {e}", exc_info=True)
         log_info("="*50)
         input("\nEnterキーを押すと終了します...") # これで画面が消えない
