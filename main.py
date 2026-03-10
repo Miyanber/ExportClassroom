@@ -9,6 +9,7 @@ import signal
 import shutil
 import time
 import mimetypes
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -38,8 +39,6 @@ def main():
 
 
     signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
-
-    lock = threading.Lock()
 
     # ロギングの設定
     import logging
@@ -222,10 +221,10 @@ def main():
         "courses"
     )
 
+
     import threading
     thread_local = threading.local()
-    import re
-
+    lock = threading.Lock()
     stop_event = threading.Event()
 
     user_profiles = {}
@@ -804,8 +803,8 @@ def main():
                 continue
         else:
             log_info("ダウンロード対象ファイルの合計サイズが1GB未満のため、自動的にアーカイブ対象に登録します。")
-            courses_to_archive.append(course)
 
+        courses_to_archive.append(course)
         all_drive_files_to_copy |= drive_files_to_copy
         all_drive_files_to_download |= drive_files_to_download
         all_drive_folders_to_copy |= drive_folders_to_copy
