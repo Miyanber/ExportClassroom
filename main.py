@@ -39,6 +39,8 @@ def main():
 
     signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
 
+    lock = threading.Lock()
+
     # ロギングの設定
     import logging
     from colorama import init, Fore, Style
@@ -528,7 +530,7 @@ def main():
             if item_mime == 'application/vnd.google-apps.folder':
                 # 子フォルダなら再帰呼び出し
                 child_files = fetch_drive_folder_details_recursive(new_folder_id, item_id, item_name)
-                drive_files_to_copy |= child_files
+                drive_files_to_copy.update(child_files)
             else:
                 log_debug(f"コピー対象追加: {item}")
                 # ファイルならコピー対象に含める
@@ -642,14 +644,15 @@ def main():
         }
 
         def clean_drive_file(drive_file):
-            global large_drive_files_size, files_to_download_size
             file_detail = fetch_drive_file_details(drive_file)
             if file_detail:
                 drive_file["title"] = file_detail["file_name"] # 拡張子補完等のため必要
                 drive_file["file_type"] = file_detail["file_type"]
                 drive_file["save_type"] = file_detail["save_type"]
                 drive_file["size"] = file_detail["size"]
-                files_to_download_size += file_detail["size"]
+                with lock:
+                    nonlocal files_to_download_size
+                    files_to_download_size += file_detail["size"]
                 if drive_file["save_type"] == "copy":
                     drive_files_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
                 elif drive_file["save_type"] == "copy (folder)":
@@ -658,7 +661,9 @@ def main():
                     drive_files_to_download.add((drive_file["id"], drive_file["title"]))
                     if drive_file["size"] > THRESHOLD_100MB:
                         large_drive_files.add((drive_file["id"], drive_file["title"]))
-                        large_drive_files_size += drive_file["size"]
+                        with lock:
+                            nonlocal large_drive_files_size
+                            large_drive_files_size += drive_file["size"]
                 elif drive_file["save_type"] == "download (skipped)":
                     pass
                 else:
@@ -666,8 +671,6 @@ def main():
 
         # CourseWork の個別提出物・返却物の取得
         def get_course_work_attachments(course_work):
-            global files_to_download_size, drive_files_to_copy, drive_files_to_download
-
             submission = submission_map.get(course_work["id"])
             if not submission:
                 return
@@ -712,8 +715,6 @@ def main():
 
         # 投稿の添付資料の取得
         def get_all_materials(item):
-            global files_to_download_size, drive_files_to_copy, drive_files_to_download
-
             if "materials" in item:
                 for material in item["materials"]:
                     if "driveFile" in material and "title" in material["driveFile"]["driveFile"]:
@@ -721,9 +722,10 @@ def main():
                         clean_drive_file(drive_file)
 
         def folders_to_files(folders):
-            global drive_files_to_copy
+            nonlocal drive_files_to_copy
             for folder in folders:
-                drive_files_to_copy |= fetch_drive_folder_details_recursive(folder[0], folder[1], folder[2])
+                new_files_to_copy = fetch_drive_folder_details_recursive(folder[0], folder[1], folder[2])
+                drive_files_to_copy.update(new_files_to_copy)
 
         for item in announcements:
             item["item_type"] = "Announcement"
