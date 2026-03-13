@@ -249,6 +249,7 @@ def main():
     # 1GBの閾値 (バイト単位)
     THRESHOLD_GB = 1 * 1024 * 1024 * 1024
     THRESHOLD_100MB = 100 * 1024 * 1024
+    THRESHOLD_5MB = 5 * 1024 * 1024
 
 
     def get_jst_str(iso_str):
@@ -421,7 +422,7 @@ def main():
 
 
     # Google ファイル以外のダウンロード
-    def download_drive_file(file_id, file_name):
+    def download_drive_file(file_id, file_name, expected_size: int, pbar):
         # 強制終了用
         if stop_event.is_set():
             log_warning(f"Cancelled: {file_name}")
@@ -433,6 +434,7 @@ def main():
         drive_service = thread_local.drive_service
         
         path = get_download_file_path(file_id, file_name)
+        downloaded_in_this_session = 0
 
         try:
             request = drive_service.files().get_media(fileId=file_id)
@@ -443,10 +445,22 @@ def main():
             while not done:
                 status, done = downloader.next_chunk()
                 log_debug(f"Downloading file... filename: {file_name}; file_id: {file_id}; progress: {int(status.progress() * 100)}%; done: {done}")
+                if status:
+                    current_total = int(status.resumable_progress)
+                    delta = current_total - downloaded_in_this_session
+                    pbar.update(delta)
+                    downloaded_in_this_session = current_total
         except HttpError as error:
             log_warning(f"ファイル（{file_name}）をダウンロードできませんでした。ファイルID: {file_id}, ステータスコード: {error.status_code}")
             log_debug(f"Failed to download file; filename: {file_name}; file_id: {file_id}; error: {error}")
             done = True
+        
+        finally:
+            # 最終的に「予定サイズ」と「実際に進んだサイズ」の差分を埋める
+            # 権限エラー等で 0 バイトだった場合も、ここで expected_size 分進む
+            diff = expected_size - downloaded_in_this_session
+            if diff > 0:
+                pbar.update(diff)
         
 
     def copy_drive_file(course_folder_id, file_id, file_name):
@@ -586,8 +600,11 @@ def main():
         drive_folders_to_copy = set()
         icons_to_download = set()
         files_to_download_size = 0
-        large_drive_files = set()
+        large_drive_files = set() # 100MB以上
         large_drive_files_size = 0
+        middle_drive_files = set() # 5MB以上
+        middle_drive_files_size = 0
+
 
         def fetch_course_data(course_id):
             # API呼び出しの定義をリスト化
@@ -667,12 +684,17 @@ def main():
                 elif drive_file["save_type"] == "copy (folder)":
                     drive_folders_to_copy.add((course_folder_id, drive_file["id"], drive_file["title"]))
                 elif drive_file["save_type"] == "download":
-                    drive_files_to_download.add((drive_file["id"], drive_file["title"]))
+                    drive_files_to_download.add((drive_file["id"], drive_file["title"], drive_file["size"]))
                     if drive_file["size"] > THRESHOLD_100MB:
-                        large_drive_files.add((drive_file["id"], drive_file["title"]))
+                        large_drive_files.add((drive_file["id"], drive_file["title"], drive_file["size"]))
                         with lock:
                             nonlocal large_drive_files_size
                             large_drive_files_size += drive_file["size"]
+                    if drive_file["size"] > THRESHOLD_5MB:
+                        middle_drive_files.add((drive_file["id"], drive_file["title"], drive_file["size"]))
+                        with lock:
+                            nonlocal middle_drive_files_size
+                            middle_drive_files_size += drive_file["size"]
                 elif drive_file["save_type"] == "download (skipped)":
                     pass
                 else:
@@ -789,8 +811,8 @@ def main():
 
             log_info("\nオプションを選んでください:")
             log_info(f"[1] 全てダウンロード ({format_size(files_to_download_size)})")
-            log_info(f"[2] 100MB以上のファイルを除外してダウンロード ({format_size(files_to_download_size - large_drive_files_size)})")
-            log_info("[3] このクラスをアーカイブ対象から除外する")
+            log_info(f"[2] 100 MB 以下のファイルのみダウンロード ({format_size(files_to_download_size - large_drive_files_size)})")
+            log_info(f"[3] 5 MB 以下のファイルのみダウンロード ({format_size(files_to_download_size - middle_drive_files_size)})")
 
             def choice_input():
                 while True:
@@ -809,8 +831,9 @@ def main():
                 files_to_download_size -= large_drive_files_size
                 drive_files_to_download -= large_drive_files
             elif choice == '3':
-                log_info(f"クラス「{course["name"]}」をアーカイブ対象から除外します。")
-                continue
+                log_info(f"100MB以上のファイルをダウンロード対象から除外します。")
+                files_to_download_size -= middle_drive_files_size
+                drive_files_to_download -= middle_drive_files
         else:
             log_info("ダウンロード対象ファイルの合計サイズが1GB未満のため、自動的にアーカイブ対象に登録します。")
 
@@ -855,10 +878,21 @@ def main():
 
 
     try:
+        
+
+        with tqdm(total=all_files_to_download_size, unit='B', unit_scale=True, desc="ファイルをダウンロード中") as pbar:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(download_file, picture[0], picture[1]) for picture in all_icons_to_download]
+                futures += [executor.submit(download_drive_file, file[0], file[1], file[2], pbar=pbar) for file in all_drive_files_to_download]
+                
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Error: {e}")
+
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(download_file, picture[0], picture[1]) for picture in all_icons_to_download]
-            futures += [executor.submit(copy_drive_file, file[0], file[1], file[2]) for file in all_drive_files_to_copy]
-            futures += [executor.submit(download_drive_file, file[0], file[1]) for file in all_drive_files_to_download]
+            futures = [executor.submit(copy_drive_file, file[0], file[1], file[2]) for file in all_drive_files_to_copy]
             
             results = []
             for future in tqdm(as_completed(futures), total=len(futures), desc=f"ファイルを保存中"):
