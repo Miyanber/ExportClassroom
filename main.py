@@ -55,6 +55,7 @@ def log_debug(msg, exc_info=False):
 
 def main():
     create_new = True
+    os.makedirs(f"./classroomArchive", exist_ok=True)
     p = Path("./classroomArchive")
     folders = [f.name for f in p.iterdir() if f.is_dir()]
     if len(folders) > 0:
@@ -83,7 +84,7 @@ def main():
         log_info(f"アーカイブ: {archive_date} を新しく作成します。")
 
     base_dir = f"classroomArchive/{archive_date}"
-    
+    os.makedirs(f"{base_dir}", exist_ok=True)
     log_info(f"保存先: {Path(base_dir).resolve()}")
 
     import threading
@@ -99,7 +100,6 @@ def main():
 
     materials_dir = resource_path("materials")
 
-    os.makedirs(f"{base_dir}", exist_ok=True)
     os.makedirs(f"{base_dir}/driveFiles", exist_ok=True)
     os.makedirs(f"{base_dir}/css", exist_ok=True)
     os.makedirs(f"{base_dir}/img", exist_ok=True)
