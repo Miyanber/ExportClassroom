@@ -54,6 +54,13 @@ def log_debug(msg, exc_info=False):
     logger.debug(msg, exc_info=exc_info)
 
 def main():
+    print("=========================================",
+        "\n   Classroom Archiver v1.0",
+        "\n=========================================",
+        "\n※本ツールは個人開発のソフトです。",
+        "\n※使用により生じた損害について作者は責任を負いません。",
+        "\n※再配布および商用利用は禁止されています。\n")
+
     create_new = True
     os.makedirs(f"./classroomArchive", exist_ok=True)
     p = Path("./classroomArchive")
