@@ -426,6 +426,7 @@ def main():
         # 強制終了用
         if stop_event.is_set():
             log_warning(f"Cancelled: {file_name}")
+            pbar.update(expected_size)
             return None
 
         if not hasattr(thread_local, "drive_service"):
@@ -895,7 +896,7 @@ def main():
             futures = [executor.submit(copy_drive_file, file[0], file[1], file[2]) for file in all_drive_files_to_copy]
             
             results = []
-            for future in tqdm(as_completed(futures), total=len(futures), desc=f"ファイルを保存中"):
+            for future in tqdm(as_completed(futures), total=len(futures), desc=f"ドライブにファイルをコピー中"):
                 results.append(future.result())
 
     except KeyboardInterrupt:
